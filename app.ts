@@ -6,22 +6,22 @@ const qrcode = require('qrcode-terminal');
 const { Client } = require('whatsapp-web.js');
 const client = new Client();
 
-const { MongoStore } = require('wwebjs-mongo');
-const mongoose = require('mongoose');
-mongoose.connect(process.env.MONGODB_URI).then(() => {
-    const store = new MongoStore({ mongoose: mongoose });
-    const client = new Client({
-        authStrategy: new RemoteAuth({
-            store: store,
-            backupSyncIntervalMs: 300000
-        })
-    });
-
-    client.initialize();
-});
-client.on('remote_session_saved', () => {
-    console.log("Saved session")
-});
+// const { MongoStore } = require('wwebjs-mongo');
+// const mongoose = require('mongoose');
+// mongoose.connect(process.env.MONGODB_URI).then(() => {
+//     const store = new MongoStore({ mongoose: mongoose });
+//     const client = new Client({
+//         authStrategy: new RemoteAuth({
+//             store: store,
+//             backupSyncIntervalMs: 300000
+//         })
+//     });
+//
+//     client.initialize();
+// });
+// client.on('remote_session_saved', () => {
+//     console.log("Saved session")
+// });
 
 const configuration = new Configuration({
     apiKey: process.env.OPENAI_API_KEY,
