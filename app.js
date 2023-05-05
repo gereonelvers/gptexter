@@ -1,58 +1,105 @@
+/*
+ * GPT-WhatsApp: A WhatsApp bot that uses GPT-4 to generate human-like responses to messages.
+ * Built with OpenAI API and whatsapp-web.js
+ */
+
 const { Configuration, OpenAIApi } = require('openai');
-const { Message, MessageSearchOptions, RemoteAuth } = require('whatsapp-web.js');
-
+const { Client, RemoteAuth} = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const { MongoStore } = require('wwebjs-mongo');
+const mongoose = require('mongoose');
 
-const { Client } = require('whatsapp-web.js');
-const client = new Client({
-    puppeteer: {
-        args: [
-            '--no-sandbox',
-        ],
-    },
-});
-
+// Initialize OpenAI API configuration
 const configuration = new Configuration({
     apiKey: process.env.OPENAI_API_KEY,
 });
 const openai = new OpenAIApi(configuration);
 
-client.on('qr', function (qr) {
-    qrcode.generate(qr, { small: true });
-});
+// GPT-4 assistant system prompt
+const systemPrompt = process.env.PROMPT;
 
-client.on('ready', function () {
-    console.log('Client is ready!');
-});
+// Auto-response state for each user
+const autoResponseState = {};
 
-client.initialize();
-
-const systemPrompt = `
-Du bist nun der Assistent von "Gereon", einem Studenten aus München, Deutschland.
-Du wirst eine Reihe von Nachrichten von einem Freund von ihm erhalten und sollst dabei helfen, passende Antworten vorzuschlagen, die Gereon dann übernehmen oder anpassen kann.
-    Gereon ist 23 Jahre alt und studiert Wirtschaftsinformatik an der TU München (TUM).
-    Sei freundlich und zuvorkommend, und verwende einen lockeren, humorvollen, informellen Schreibstil, der Gereons Art zu kommunizieren ähnelt.
-    Gib keine verbindlichen Zusagen zu Terminen oder anderen Dingen, sondern schlage stattdessen mögliche Optionen vor, die Gereon später bestätigen kann.
-    Du antwortest immer aus der Sicht von Gereon und kommunizierst entsprechend niemals mit ihm.
-    `
-
-client.on('message', async function (message) {
-    console.log("Received message:");
-    console.log(message.body);
-
-    if (message.body.includes('!gpt')) {
-        const completion = await openai.createChatCompletion({
-            model: "gpt-4",
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: message.body }
+mongoose.connect(process.env.MONGO_URL).then(() => {
+    const store = new MongoStore({ mongoose: mongoose });
+    const client = new Client({
+        puppeteer: {
+            args: [
+                '--no-sandbox',
             ],
-        });
-        if (completion && completion.data && completion.data.choices[0] && completion.data.choices[0].message) {
-            const response = completion.data.choices[0].message.content;
-            console.log("Generated Response")
-            console.log(response)
-            await client.sendMessage(message.from, response);
-        }
-    }
+        },
+        authStrategy: new RemoteAuth({
+            store: store,
+            backupSyncIntervalMs: 600000
+        })
+    });
+
+    // Event handlers
+    client.on('qr', (qr) => {
+        qrcode.generate(qr, { small: true });
+    });
+    client.on('ready', () => {
+        console.log('Client is ready!');
+    });
+    client.on('remote_session_saved', () => {
+        console.log('Saved session login!');
+    });
+    client.on('message', handleMessage);
+    client.initialize();
 });
+
+// Helper functions
+
+function handleMessage(message) {
+    console.log("Received message:", message.body);
+
+    if (message.body.toLowerCase().includes('!gpt')) {
+        toggleAutoResponse(message);
+        return;
+    }
+
+    if (autoResponseState[message.from]) {
+        generateAndSendResponse(message);
+    }
+}
+
+async function generateAndSendResponse(message) {
+    const messages = await fetchAndPrepareMessages(message);
+    const shouldRespond = messages.some(msg => msg.body.includes('!gpt'));
+
+    if (!shouldRespond) return;
+
+    const completion = await openai.createChatCompletion({
+        model: "gpt-4",
+        messages,
+    });
+
+    if (completion && completion.data && completion.data.choices[0] && completion.data.choices[0].message) {
+        const response = completion.data.choices[0].message.content;
+        console.log("Generated Response:", response);
+        await client.sendMessage(message.from, response);
+    }
+}
+
+function toggleAutoResponse(message) {
+    autoResponseState[message.from] = !autoResponseState[message.from];
+    if (typeof autoResponseState[message.from] === 'undefined') {
+        // Initialize user's auto-response state if not set
+        autoResponseState[message.from] = false;
+    }
+    console.log('Auto response toggled for user:', message.from, autoResponseState[message.from]);
+}
+
+async function fetchAndPrepareMessages(message) {
+    const searchOptions = { limit: 20 };
+    const messages = await (await message.getChat()).fetchMessages(searchOptions);
+    const apiMessages = [{ role: "system", content: systemPrompt }];
+
+    messages.reverse().forEach((msg) => {
+        const role = msg.author === message.from ? 'user' : 'assistant';
+        apiMessages.push({ role, content: msg.body });
+    });
+
+    return apiMessages;
+}
