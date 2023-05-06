@@ -56,7 +56,6 @@ function handleMessage(message) {
 
     if (message.body.toLowerCase().includes('!gpt')) {
         toggleAutoResponse(message);
-        return;
     }
 
     if (autoResponseState[message.from]) {
@@ -66,10 +65,6 @@ function handleMessage(message) {
 
 async function generateAndSendResponse(message) {
     const messages = await fetchAndPrepareMessages(message);
-    const shouldRespond = messages.some(msg => msg.body.includes('!gpt'));
-
-    if (!shouldRespond) return;
-
     const completion = await openai.createChatCompletion({
         model: "gpt-4",
         messages,
@@ -83,10 +78,11 @@ async function generateAndSendResponse(message) {
 }
 
 function toggleAutoResponse(message) {
-    autoResponseState[message.from] = !autoResponseState[message.from];
     if (typeof autoResponseState[message.from] === 'undefined') {
         // Initialize user's auto-response state if not set
         autoResponseState[message.from] = false;
+    } else {
+        autoResponseState[message.from] = !autoResponseState[message.from];
     }
     console.log('Auto response toggled for user:', message.from, autoResponseState[message.from]);
 }
