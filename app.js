@@ -47,55 +47,56 @@ mongoose.connect(process.env.MONGO_URL).then(() => {
     });
     client.on('message', handleMessage);
     client.initialize();
-});
+
 
 // Helper functions
 
-function handleMessage(message) {
-    console.log("Received message:", message.body);
+    function handleMessage(message) {
+        console.log("Received message:", message.body);
 
-    if (message.body.toLowerCase().includes('!gpt')) {
-        toggleAutoResponse(message);
+        if (message.body.toLowerCase().includes('!gpt')) {
+            toggleAutoResponse(message);
+        }
+
+        if (autoResponseState[message.from]) {
+            generateAndSendResponse(message);
+        }
     }
 
-    if (autoResponseState[message.from]) {
-        generateAndSendResponse(message);
+    async function generateAndSendResponse(message) {
+        const messages = await fetchAndPrepareMessages(message);
+        const completion = await openai.createChatCompletion({
+            model: "gpt-4",
+            messages,
+        });
+
+        if (completion && completion.data && completion.data.choices[0] && completion.data.choices[0].message) {
+            const response = completion.data.choices[0].message.content;
+            console.log("Generated Response:", response);
+            await client.sendMessage(message.from, response);
+        }
     }
-}
 
-async function generateAndSendResponse(message) {
-    const messages = await fetchAndPrepareMessages(message);
-    const completion = await openai.createChatCompletion({
-        model: "gpt-4",
-        messages,
-    });
-
-    if (completion && completion.data && completion.data.choices[0] && completion.data.choices[0].message) {
-        const response = completion.data.choices[0].message.content;
-        console.log("Generated Response:", response);
-        await client.sendMessage(message.from, response);
+    function toggleAutoResponse(message) {
+        if (typeof autoResponseState[message.from] === 'undefined') {
+            // Initialize user's auto-response state if not set
+            autoResponseState[message.from] = false;
+        } else {
+            autoResponseState[message.from] = !autoResponseState[message.from];
+        }
+        console.log('Auto response toggled for user:', message.from, autoResponseState[message.from]);
     }
-}
 
-function toggleAutoResponse(message) {
-    if (typeof autoResponseState[message.from] === 'undefined') {
-        // Initialize user's auto-response state if not set
-        autoResponseState[message.from] = false;
-    } else {
-        autoResponseState[message.from] = !autoResponseState[message.from];
+    async function fetchAndPrepareMessages(message) {
+        const searchOptions = { limit: 20 };
+        const messages = await (await message.getChat()).fetchMessages(searchOptions);
+        const apiMessages = [{ role: "system", content: systemPrompt }];
+
+        messages.reverse().forEach((msg) => {
+            const role = msg.author === message.from ? 'user' : 'assistant';
+            apiMessages.push({ role, content: msg.body });
+        });
+
+        return apiMessages;
     }
-    console.log('Auto response toggled for user:', message.from, autoResponseState[message.from]);
-}
-
-async function fetchAndPrepareMessages(message) {
-    const searchOptions = { limit: 20 };
-    const messages = await (await message.getChat()).fetchMessages(searchOptions);
-    const apiMessages = [{ role: "system", content: systemPrompt }];
-
-    messages.reverse().forEach((msg) => {
-        const role = msg.author === message.from ? 'user' : 'assistant';
-        apiMessages.push({ role, content: msg.body });
-    });
-
-    return apiMessages;
-}
+});
